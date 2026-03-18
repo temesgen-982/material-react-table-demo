@@ -7,10 +7,12 @@ import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
 import ExpandLessRoundedIcon from "@mui/icons-material/ExpandLessRounded";
 import ExpandMoreRoundedIcon from "@mui/icons-material/ExpandMoreRounded";
+import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
 import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import PictureAsPdfOutlinedIcon from "@mui/icons-material/PictureAsPdfOutlined";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
 import TableViewOutlinedIcon from "@mui/icons-material/TableViewOutlined";
+import MicOffRoundedIcon from "@mui/icons-material/MicOffRounded";
 import {
   Alert,
   AlertTitle,
@@ -667,10 +669,11 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         PaperProps={{
           sx: {
             overflow: "hidden",
-            width: "min(100%, 404px)",
-            height: "min(500px, calc(100vh - 96px))",
+            width: "min(100%, 398px)",
+            height: "min(486px, calc(100vh - 96px))",
             borderRadius: 1.5,
-            boxShadow: "0 18px 40px rgba(15, 23, 42, 0.16)",
+            border: "1px solid rgba(15, 118, 110, 0.12)",
+            boxShadow: "0 18px 48px rgba(15, 118, 110, 0.16)",
           },
         }}
       >
@@ -689,11 +692,11 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           <DialogTitle sx={{ px: 2, py: 1.25 }}>
             <Stack direction="row" alignItems="flex-start" justifyContent="space-between">
               <Box>
-                <Typography fontWeight={700} lineHeight={1.15} fontSize={20}>
+                <Typography fontWeight={700} lineHeight={1.1} fontSize={18}>
                   AI Assistant
                 </Typography>
                 <Typography
-                  variant="body2"
+                  variant="caption"
                   color="text.secondary"
                   lineHeight={1.2}
                   sx={{
@@ -712,17 +715,26 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                     aria-label="Start new AI conversation"
                     onClick={resetAiAssistant}
                     size="small"
-                    sx={{ color: "text.secondary" }}
+                    sx={{ color: "text.secondary", p: 0.5 }}
                   >
                     <AddRoundedIcon fontSize="small" />
                   </IconButton>
                 </Tooltip>
-                <Tooltip title="Clear history">
+                <Tooltip title="History">
                   <IconButton
-                    aria-label="Clear AI history"
+                    aria-label="View AI history"
+                    size="small"
+                    sx={{ color: "text.secondary", p: 0.5 }}
+                  >
+                    <HistoryRoundedIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Reset conversation">
+                  <IconButton
+                    aria-label="Reset AI conversation"
                     onClick={resetAiAssistant}
                     size="small"
-                    sx={{ color: "text.secondary" }}
+                    sx={{ color: "text.secondary", p: 0.5 }}
                   >
                     <RefreshRoundedIcon fontSize="small" />
                   </IconButton>
@@ -731,7 +743,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                   aria-label="Close AI assistant"
                   onClick={() => setIsAiDialogOpen(false)}
                   size="small"
-                  sx={{ color: "text.secondary" }}
+                  sx={{ color: "text.secondary", p: 0.5 }}
                 >
                   <CloseRoundedIcon fontSize="small" />
                 </IconButton>
@@ -751,18 +763,20 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             }}
           >
             {aiHistory.length > 0 || aiPendingPrompt || fetcher.state !== "idle" ? (
-              <Stack spacing={1.75} sx={{ width: "100%" }}>
+              <Stack spacing={1.5} sx={{ width: "100%" }}>
                 {aiHistory.map((entry) => (
                   <Stack key={entry.id} direction="row" spacing={1} alignItems="flex-start">
-                    <AutoAwesomeRoundedIcon sx={{ mt: 0.4, fontSize: 14, color: "text.secondary" }} />
+                    <AutoAwesomeRoundedIcon
+                      sx={{ mt: 0.35, fontSize: 14, color: "primary.main", opacity: 0.8 }}
+                    />
                     <Stack spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
-                      <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", lineHeight: 1.35 }}>
+                      <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", lineHeight: 1.3 }}>
                         {entry.prompt}
                       </Typography>
                       <Typography
                         variant="body2"
                         color={entry.kind === "error" ? "error.main" : "text.secondary"}
-                        sx={{ lineHeight: 1.35, fontSize: 13 }}
+                        sx={{ lineHeight: 1.3, fontSize: 12.5 }}
                       >
                         {entry.message}
                       </Typography>
@@ -792,10 +806,11 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                               minWidth: 0,
                               px: 0,
                               mt: 0.15,
-                              mb: 0.35,
+                              mb: 0.25,
                               fontSize: 11.5,
                               fontWeight: 700,
                               textTransform: "none",
+                              color: "primary.main",
                             }}
                           >
                             Applied changes
@@ -811,8 +826,9 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                                   sx={{
                                     height: 22,
                                     borderRadius: 999,
-                                    backgroundColor: "#ececec",
-                                    color: "text.primary",
+                                    backgroundColor: "rgba(15, 118, 110, 0.12)",
+                                    color: "#14532d",
+                                    border: "1px solid rgba(15, 118, 110, 0.16)",
                                     "& .MuiChip-label": {
                                       px: 1,
                                       fontSize: 12,
@@ -829,7 +845,9 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                 ))}
                 {fetcher.state !== "idle" && aiPendingPrompt && (
                   <Stack direction="row" spacing={1} alignItems="flex-start">
-                    <AutoAwesomeRoundedIcon sx={{ mt: 0.4, fontSize: 14, color: "text.secondary" }} />
+                    <AutoAwesomeRoundedIcon
+                      sx={{ mt: 0.35, fontSize: 14, color: "primary.main", opacity: 0.8 }}
+                    />
                     <Stack spacing={0.5}>
                       <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", lineHeight: 1.35 }}>
                         {aiPendingPrompt}
@@ -863,43 +881,58 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               <Box
                 sx={{
                   border: "1px solid",
-                  borderColor: "divider",
+                  borderColor: "rgba(15, 118, 110, 0.22)",
                   borderRadius: 0.75,
-                  px: 1,
-                  py: 0.5,
-                  backgroundColor: "#fafafa",
+                  px: 0.875,
+                  py: 0.375,
+                  backgroundColor: "rgba(15, 118, 110, 0.04)",
                 }}
               >
-                <TextField
-                  autoFocus
-                  fullWidth
-                  multiline
-                  minRows={1}
-                  maxRows={4}
-                  variant="standard"
-                  value={aiPrompt}
-                  onChange={(event) => setAiPrompt(event.target.value)}
-                  placeholder="Type a prompt..."
-                  InputProps={{
-                    disableUnderline: true,
-                    endAdornment: (
-                      <IconButton
-                        type="submit"
-                        aria-label="Ask AI"
-                        disabled={fetcher.state !== "idle" || !aiPrompt.trim()}
-                        size="small"
-                        sx={{ color: "text.secondary" }}
-                      >
-                        {fetcher.state !== "idle" ? (
-                          <CircularProgress size={18} />
-                        ) : (
-                          <SendRoundedIcon fontSize="small" />
-                        )}
-                      </IconButton>
-                    ),
-                  }}
-                />
+                <Stack direction="row" spacing={0.5} alignItems="center">
+                  <IconButton
+                    type="button"
+                    aria-label="Voice input unavailable"
+                    size="small"
+                    disabled
+                    sx={{ color: "text.disabled", p: 0.5 }}
+                  >
+                    <MicOffRoundedIcon fontSize="small" />
+                  </IconButton>
+                  <TextField
+                    autoFocus
+                    fullWidth
+                    multiline
+                    minRows={1}
+                    maxRows={4}
+                    variant="standard"
+                    value={aiPrompt}
+                    onChange={(event) => setAiPrompt(event.target.value)}
+                    placeholder="Type a prompt..."
+                    InputProps={{
+                      disableUnderline: true,
+                    }}
+                  />
+                  <IconButton
+                    type="submit"
+                    aria-label="Ask AI"
+                    disabled={fetcher.state !== "idle" || !aiPrompt.trim()}
+                    size="small"
+                    sx={{
+                      color: aiPrompt.trim() ? "primary.main" : "text.disabled",
+                      p: 0.5,
+                    }}
+                  >
+                    {fetcher.state !== "idle" ? (
+                      <CircularProgress size={18} />
+                    ) : (
+                      <SendRoundedIcon fontSize="small" />
+                    )}
+                  </IconButton>
+                </Stack>
               </Box>
+              <Typography variant="caption" color="text.secondary">
+                Suggestions
+              </Typography>
               <Box
                 sx={{
                   display: "flex",
@@ -920,6 +953,11 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                       flexShrink: 0,
                       height: 30,
                       borderRadius: 999,
+                      borderColor: "rgba(15, 118, 110, 0.22)",
+                      color: "text.primary",
+                      "&:hover": {
+                        backgroundColor: "rgba(15, 118, 110, 0.08)",
+                      },
                       "& .MuiChip-label": {
                         px: 1.1,
                         fontSize: 12.5,
