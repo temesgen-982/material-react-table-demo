@@ -1,3 +1,6 @@
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
+
 import type { Post } from "./types";
 
 type ExportablePost = {
@@ -61,6 +64,19 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#39;");
 }
 
+function openAndDownloadBlob(blob: Blob, fileName: string) {
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = blobUrl;
+  link.download = fileName;
+  link.click();
+
+  window.setTimeout(() => {
+    URL.revokeObjectURL(blobUrl);
+  }, 60_000);
+}
+
 export function exportPostsToCsv(rows: Post[], fileName: string) {
   const exportableRows = rows.map(toExportablePost);
   const csv = [
@@ -75,84 +91,58 @@ export function exportPostsToCsv(rows: Post[], fileName: string) {
 
 export function exportPostsToPdf(rows: Post[], title: string) {
   const exportableRows = rows.map(toExportablePost);
-  const printWindow = window.open("", "_blank", "noopener,noreferrer");
+  const doc = new jsPDF({
+    orientation: "landscape",
+    unit: "pt",
+    format: "a4",
+  });
+  const exportTime = new Date().toLocaleString();
+  const fileName = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "posts-export"}.pdf`;
 
-  if (!printWindow) {
-    return;
-  }
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.text(title, 40, 40);
 
-  const tableRows = exportableRows
-    .map(
-      (row) => `
-        <tr>
-          ${exportHeaders
-            .map((header) => `<td>${escapeHtml(row[header])}</td>`)
-            .join("")}
-        </tr>
-      `,
-    )
-    .join("");
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text(`${rows.length} rows exported on ${exportTime}`, 40, 60);
 
-  printWindow.document.write(`
-    <!doctype html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          body {
-            font-family: Inter, system-ui, sans-serif;
-            margin: 24px;
-            color: #17201f;
-          }
-          h1 {
-            margin: 0 0 8px;
-            font-size: 24px;
-          }
-          p {
-            margin: 0 0 24px;
-            color: #4b635f;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            table-layout: fixed;
-          }
-          th, td {
-            border: 1px solid #cfe0dc;
-            padding: 8px;
-            text-align: left;
-            vertical-align: top;
-            word-break: break-word;
-            font-size: 12px;
-          }
-          th {
-            background: #e3f1ee;
-          }
-          @media print {
-            body {
-              margin: 12px;
-            }
-          }
-        </style>
-      </head>
-      <body>
-        <h1>${escapeHtml(title)}</h1>
-        <p>${escapeHtml(`${rows.length} rows exported on ${new Date().toLocaleString()}`)}</p>
-        <table>
-          <thead>
-            <tr>
-              ${exportHeaders.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}
-            </tr>
-          </thead>
-          <tbody>
-            ${tableRows}
-          </tbody>
-        </table>
-      </body>
-    </html>
-  `);
-  printWindow.document.close();
-  printWindow.focus();
-  printWindow.print();
+  autoTable(doc, {
+    startY: 76,
+    head: [exportHeaders],
+    body: exportableRows.map((row) => exportHeaders.map((header) => String(row[header]))),
+    styles: {
+      font: "helvetica",
+      fontSize: 8,
+      cellPadding: 6,
+      overflow: "linebreak",
+      valign: "top",
+    },
+    headStyles: {
+      fillColor: [227, 241, 238],
+      textColor: [23, 32, 31],
+      fontStyle: "bold",
+    },
+    bodyStyles: {
+      textColor: [23, 32, 31],
+    },
+    margin: {
+      top: 76,
+      right: 40,
+      bottom: 40,
+      left: 40,
+    },
+    columnStyles: {
+      0: { cellWidth: 38 },
+      1: { cellWidth: 180 },
+      2: { cellWidth: 250 },
+      3: { cellWidth: 120 },
+      4: { cellWidth: 55 },
+      5: { cellWidth: 60 },
+      6: { cellWidth: 55 },
+      7: { cellWidth: 50 },
+    },
+  });
+
+  openAndDownloadBlob(doc.output("blob"), fileName);
 }
