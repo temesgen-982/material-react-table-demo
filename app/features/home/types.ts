@@ -42,6 +42,11 @@ export type AiFilter = {
   filterFn: MRT_FilterOption;
 };
 
+export type AiChatMessage = {
+  role: "user" | "assistant";
+  text: string;
+};
+
 export type AiPlan =
   | {
       summary: string;
@@ -64,10 +69,13 @@ export type AiAssistantResponse =
   | {
       ok: true;
       plan: AiPlan;
+      conversationId: string;
+      message: string;
     }
   | {
       ok: false;
       error: string;
+      conversationId?: string;
     };
 
 export type AiTableContext = {
@@ -78,4 +86,11 @@ export type AiTableContext = {
   globalFilter: string;
   columnVisibility: MRT_VisibilityState;
   columnPinning: MRT_ColumnPinningState;
+};
+
+export type AiConversationRequest = {
+  prompt: string;
+  conversationId: string;
+  history: AiChatMessage[];
+  currentState: AiTableContext | null;
 };

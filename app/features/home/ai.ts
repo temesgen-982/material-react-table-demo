@@ -1,7 +1,13 @@
 import type { MRT_ColumnPinningState } from "material-react-table";
 
 import { REQUIRED_LEFT_PINS, REQUIRED_RIGHT_PINS } from "./constants";
-import type { AiAssistantResponse, AiPlan, AiTableContext } from "./types";
+import type {
+  AiAssistantResponse,
+  AiChatMessage,
+  AiConversationRequest,
+  AiPlan,
+  AiTableContext,
+} from "./types";
 
 export const aiPlanSchema = {
   type: "object",
@@ -134,7 +140,19 @@ export function withRequiredPins(pinning: MRT_ColumnPinningState): MRT_ColumnPin
   };
 }
 
-function buildAiPrompt(prompt: string, currentState: AiTableContext | null) {
+function formatConversationHistory(history: AiChatMessage[]) {
+  if (history.length === 0) {
+    return "No previous messages.";
+  }
+
+  return history.map((message) => `${message.role.toUpperCase()}: ${message.text}`).join("\n");
+}
+
+function buildAiPrompt({
+  prompt,
+  currentState,
+  history,
+}: Pick<AiConversationRequest, "prompt" | "currentState" | "history">) {
   return [
     "You translate natural-language table requests into structured Material React Table state updates.",
     "Available columns:",
@@ -157,21 +175,23 @@ function buildAiPrompt(prompt: string, currentState: AiTableContext | null) {
     "Aggregation is already predefined in the table. To aggregate, group by a column. The table will count titles, sum likes, sum dislikes, and sum views automatically.",
     "Display columns mrt-row-expand, mrt-row-select, mrt-row-number, and mrt-row-actions stay pinned by default.",
     "Use precise column filters when possible. For text matching use contains or equals. For numeric comparisons use greaterThan, greaterThanOrEqualTo, lessThan, or lessThanOrEqualTo.",
+    "When the user asks a follow-up question, use the previous conversation to resolve references like 'that', 'same filter', or 'also sort it'.",
     "Return JSON only, matching the provided schema.",
+    `Previous conversation:\n${formatConversationHistory(history)}`,
     `Current table state: ${JSON.stringify(currentState)}`,
     `User request: ${prompt.trim()}`,
   ].join("\n");
 }
 
-export async function generateAiPlan({
-  apiKey,
-  prompt,
-  currentState,
-}: {
-  apiKey: string;
-  prompt: string;
-  currentState: AiTableContext | null;
-}): Promise<AiAssistantResponse> {
+export async function generateAiPlan(
+  {
+    prompt,
+    conversationId,
+    history,
+    currentState,
+  }: AiConversationRequest,
+  apiKey: string,
+): Promise<AiAssistantResponse> {
   try {
     const { GoogleGenAI } = await import("@google/genai");
     const ai = new GoogleGenAI({ apiKey });
@@ -180,7 +200,7 @@ export async function generateAiPlan({
       contents: [
         {
           role: "user",
-          parts: [{ text: buildAiPrompt(prompt, currentState) }],
+          parts: [{ text: buildAiPrompt({ prompt, currentState, history }) }],
         },
       ],
       config: {
@@ -192,15 +212,24 @@ export async function generateAiPlan({
     });
 
     if (!response.text) {
-      return { ok: false, error: "The AI assistant returned an empty response." };
+      return {
+        ok: false,
+        error: "The AI assistant returned an empty response.",
+        conversationId,
+      };
     }
 
     const plan = JSON.parse(response.text) as AiPlan;
 
-    return { ok: true, plan };
+    return {
+      ok: true,
+      plan,
+      conversationId,
+      message: plan.summary,
+    };
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "The AI assistant could not process that request.";
-    return { ok: false, error: message };
+    return { ok: false, error: message, conversationId };
   }
 }

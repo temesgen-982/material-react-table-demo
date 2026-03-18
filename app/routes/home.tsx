@@ -1,9 +1,13 @@
 import { startTransition, useEffect, useRef, useState } from "react";
 import AutoAwesomeRoundedIcon from "@mui/icons-material/AutoAwesomeRounded";
+import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
+import ExpandLessRoundedIcon from "@mui/icons-material/ExpandLessRounded";
+import ExpandMoreRoundedIcon from "@mui/icons-material/ExpandMoreRounded";
+import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import PictureAsPdfOutlinedIcon from "@mui/icons-material/PictureAsPdfOutlined";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
 import TableViewOutlinedIcon from "@mui/icons-material/TableViewOutlined";
@@ -13,6 +17,7 @@ import {
   Box,
   Button,
   Chip,
+  Collapse,
   CircularProgress,
   CssBaseline,
   Dialog,
@@ -43,7 +48,6 @@ import {
   type MRT_ColumnFiltersState,
   type MRT_ColumnPinningState,
   type MRT_GroupingState,
-  type MRT_Row,
   type MRT_SortingState,
   type MRT_VisibilityState,
 } from "material-react-table";
@@ -65,6 +69,7 @@ import {
 import { exportPostsToCsv, exportPostsToPdf } from "~/features/home/export-utils";
 import type {
   AiAssistantResponse,
+  AiChatMessage,
   AiFilter,
   AiTableContext,
   Post,
@@ -72,6 +77,58 @@ import type {
 } from "~/features/home/types";
 
 import type { Route } from "./+types/home";
+
+type AiAssistantHistoryEntry = {
+  id: string;
+  prompt: string;
+  message: string;
+  kind: "success" | "error";
+  appliedChanges: string[];
+  isExpanded: boolean;
+};
+
+function getAppliedChangeLabels(response: AiAssistantResponse | undefined) {
+  if (!response?.ok) {
+    return [];
+  }
+
+  return response.plan.operations.flatMap((operation) => {
+    switch (operation.type) {
+      case "resetTableState":
+        return ["Reset table state"];
+      case "setSorting":
+        return operation.sorting.map(
+          (sort) => `${sort.desc ? "Descending" : "Ascending"} sort on ${sort.id}`,
+        );
+      case "setGrouping":
+        return operation.grouping.map((group) => `Group by ${group}`);
+      case "setColumnFilters":
+        return operation.filters.map((filter) => {
+          const operatorLabels: Partial<Record<AiFilter["filterFn"], string>> = {
+            contains: "contains",
+            equals: "equals",
+            greaterThan: ">",
+            greaterThanOrEqualTo: ">=",
+            lessThan: "<",
+            lessThanOrEqualTo: "<=",
+          };
+
+          return `${filter.id} ${operatorLabels[filter.filterFn] ?? filter.filterFn} ${String(filter.value)}`;
+        });
+      case "setGlobalFilter":
+        return [`Global search: ${operation.value}`];
+      case "setColumnVisibility":
+        return Object.entries(operation.visibility).map(
+          ([columnId, visible]) => `${visible ? "Show" : "Hide"} ${columnId}`,
+        );
+      case "setColumnPinning":
+        return [
+          ...operation.left.map((columnId) => `Pin left: ${columnId}`),
+          ...operation.right.map((columnId) => `Pin right: ${columnId}`),
+        ];
+    }
+  });
+}
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -99,19 +156,31 @@ export async function loader() {
 export async function action({ request }: Route.ActionArgs): Promise<AiAssistantResponse> {
   const formData = await request.formData();
   const prompt = formData.get("prompt");
+  const conversationId = formData.get("conversationId");
+  const historyInput = formData.get("history");
   const tableContextInput = formData.get("tableContext");
 
   if (typeof prompt !== "string" || !prompt.trim()) {
     return { ok: false, error: "Enter a prompt so the assistant knows what to change." };
   }
 
+  const safeConversationId =
+    typeof conversationId === "string" && conversationId.trim()
+      ? conversationId
+      : crypto.randomUUID();
+
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
-    return { ok: false, error: "GEMINI_API_KEY is missing from the server environment." };
+    return {
+      ok: false,
+      error: "GEMINI_API_KEY is missing from the server environment.",
+      conversationId: safeConversationId,
+    };
   }
 
   let currentState: AiTableContext | null = null;
+  let history: AiChatMessage[] = [];
 
   if (typeof tableContextInput === "string" && tableContextInput.trim()) {
     try {
@@ -121,11 +190,23 @@ export async function action({ request }: Route.ActionArgs): Promise<AiAssistant
     }
   }
 
-  return generateAiPlan({
+  if (typeof historyInput === "string" && historyInput.trim()) {
+    try {
+      history = JSON.parse(historyInput) as AiChatMessage[];
+    } catch {
+      history = [];
+    }
+  }
+
+  return generateAiPlan(
+    {
+      conversationId: safeConversationId,
+      history,
+      prompt,
+      currentState,
+    },
     apiKey,
-    prompt,
-    currentState,
-  });
+  );
 }
 
 export default function Home({ loaderData }: Route.ComponentProps) {
@@ -145,6 +226,10 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     useState<MRT_VisibilityState>(DEFAULT_COLUMN_VISIBILITY);
   const [columnPinning, setColumnPinning] =
     useState<MRT_ColumnPinningState>(DEFAULT_COLUMN_PINNING);
+  const [aiConversationId] = useState(() => crypto.randomUUID());
+  const [aiMessages, setAiMessages] = useState<AiChatMessage[]>([]);
+  const [aiHistory, setAiHistory] = useState<AiAssistantHistoryEntry[]>([]);
+  const [aiPendingPrompt, setAiPendingPrompt] = useState("");
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiMessage, setAiMessage] = useState<{ kind: "success" | "error"; text: string } | null>(
     null,
@@ -163,6 +248,14 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     setRowToDelete(null);
   };
 
+  const resetAiAssistant = () => {
+    setAiMessages([]);
+    setAiHistory([]);
+    setAiPendingPrompt("");
+    setAiPrompt("");
+    setAiMessage(null);
+  };
+
   useEffect(() => {
     const response = fetcher.data;
 
@@ -173,6 +266,18 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     lastHandledResponseRef.current = response;
 
     if (!response.ok) {
+      setAiHistory((currentHistory) => [
+        ...currentHistory,
+        {
+          id: `${response.conversationId ?? aiConversationId}-${currentHistory.length}`,
+          prompt: aiPendingPrompt,
+          message: response.error,
+          kind: "error",
+          appliedChanges: [],
+          isExpanded: false,
+        },
+      ]);
+      setAiPendingPrompt("");
       setAiMessage({ kind: "error", text: response.error });
       return;
     }
@@ -226,18 +331,34 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       }
     });
 
-    setAiMessage({ kind: "success", text: response.plan.summary });
-    setIsAiDialogOpen(false);
-  }, [fetcher.data]);
+    setAiHistory((currentHistory) => [
+      ...currentHistory,
+      {
+        id: `${response.conversationId}-${currentHistory.length}`,
+        prompt: aiPendingPrompt,
+        message: response.message,
+        kind: "success",
+        appliedChanges: getAppliedChangeLabels(response),
+        isExpanded: true,
+      },
+    ]);
+    setAiPendingPrompt("");
+    setAiMessage({ kind: "success", text: response.message });
+  }, [aiConversationId, aiPendingPrompt, fetcher.data]);
 
-  const submitAiPrompt = () => {
-    const trimmedPrompt = aiPrompt.trim();
+  const submitAiPrompt = (promptOverride?: string) => {
+    const trimmedPrompt = (promptOverride ?? aiPrompt).trim();
 
     if (!trimmedPrompt) {
       return;
     }
 
+    const nextMessages: AiChatMessage[] = [...aiMessages, { role: "user", text: trimmedPrompt }];
+
+    setAiMessages(nextMessages);
+    setAiPendingPrompt(trimmedPrompt);
     setAiMessage(null);
+    setAiPrompt("");
 
     const tableContext: AiTableContext = {
       sorting,
@@ -251,6 +372,8 @@ export default function Home({ loaderData }: Route.ComponentProps) {
 
     fetcher.submit(
       {
+        conversationId: aiConversationId,
+        history: JSON.stringify(nextMessages),
         prompt: trimmedPrompt,
         tableContext: JSON.stringify(tableContext),
       },
@@ -544,7 +667,10 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         PaperProps={{
           sx: {
             overflow: "hidden",
-            height: "min(560px, calc(100vh - 96px))",
+            width: "min(100%, 404px)",
+            height: "min(500px, calc(100vh - 96px))",
+            borderRadius: 1.5,
+            boxShadow: "0 18px 40px rgba(15, 23, 42, 0.16)",
           },
         }}
       >
@@ -560,57 +686,188 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             submitAiPrompt();
           }}
         >
-          <DialogTitle sx={{ px: 2.5, py: 1.5 }}>
+          <DialogTitle sx={{ px: 2, py: 1.25 }}>
             <Stack direction="row" alignItems="flex-start" justifyContent="space-between">
               <Box>
-                <Typography fontWeight={700}>AI Assistant</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  New conversation
+                <Typography fontWeight={700} lineHeight={1.15} fontSize={20}>
+                  AI Assistant
+                </Typography>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  lineHeight={1.2}
+                  sx={{
+                    maxWidth: 250,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {aiPendingPrompt || aiHistory.at(-1)?.prompt || "Ask your table"}
                 </Typography>
               </Box>
-              <IconButton aria-label="Close AI assistant" onClick={() => setIsAiDialogOpen(false)}>
-                <CloseRoundedIcon />
-              </IconButton>
+              <Stack direction="row" spacing={0.5}>
+                <Tooltip title="New conversation">
+                  <IconButton
+                    aria-label="Start new AI conversation"
+                    onClick={resetAiAssistant}
+                    size="small"
+                    sx={{ color: "text.secondary" }}
+                  >
+                    <AddRoundedIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Clear history">
+                  <IconButton
+                    aria-label="Clear AI history"
+                    onClick={resetAiAssistant}
+                    size="small"
+                    sx={{ color: "text.secondary" }}
+                  >
+                    <RefreshRoundedIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <IconButton
+                  aria-label="Close AI assistant"
+                  onClick={() => setIsAiDialogOpen(false)}
+                  size="small"
+                  sx={{ color: "text.secondary" }}
+                >
+                  <CloseRoundedIcon fontSize="small" />
+                </IconButton>
+              </Stack>
             </Stack>
           </DialogTitle>
           <Divider />
           <DialogContent
             sx={{
-              px: 3,
-              py: 0,
+              px: 2,
+              py: 1.5,
               flex: 1,
               display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
+              alignItems: "stretch",
+              justifyContent: "flex-start",
+              overflowY: "auto",
             }}
           >
-            {aiMessage ? (
-              <Stack spacing={1} sx={{ textAlign: "center", maxWidth: 360 }}>
-                <Typography fontWeight={600}>
-                  {aiMessage.kind === "success" ? "Last assistant update" : "Assistant error"}
-                </Typography>
-                <Typography color="text.secondary">{aiMessage.text}</Typography>
+            {aiHistory.length > 0 || aiPendingPrompt || fetcher.state !== "idle" ? (
+              <Stack spacing={1.75} sx={{ width: "100%" }}>
+                {aiHistory.map((entry) => (
+                  <Stack key={entry.id} direction="row" spacing={1} alignItems="flex-start">
+                    <AutoAwesomeRoundedIcon sx={{ mt: 0.4, fontSize: 14, color: "text.secondary" }} />
+                    <Stack spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
+                      <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", lineHeight: 1.35 }}>
+                        {entry.prompt}
+                      </Typography>
+                      <Typography
+                        variant="body2"
+                        color={entry.kind === "error" ? "error.main" : "text.secondary"}
+                        sx={{ lineHeight: 1.35, fontSize: 13 }}
+                      >
+                        {entry.message}
+                      </Typography>
+                      {entry.kind === "success" && entry.appliedChanges.length > 0 && (
+                        <Box>
+                          <Button
+                            type="button"
+                            size="small"
+                            color="primary"
+                            onClick={() =>
+                              setAiHistory((currentHistory) =>
+                                currentHistory.map((currentEntry) =>
+                                  currentEntry.id === entry.id
+                                    ? { ...currentEntry, isExpanded: !currentEntry.isExpanded }
+                                    : currentEntry,
+                                ),
+                              )
+                            }
+                            endIcon={
+                              entry.isExpanded ? (
+                                <ExpandLessRoundedIcon fontSize="small" />
+                              ) : (
+                                <ExpandMoreRoundedIcon fontSize="small" />
+                              )
+                            }
+                            sx={{
+                              minWidth: 0,
+                              px: 0,
+                              mt: 0.15,
+                              mb: 0.35,
+                              fontSize: 11.5,
+                              fontWeight: 700,
+                              textTransform: "none",
+                            }}
+                          >
+                            Applied changes
+                          </Button>
+                          <Collapse in={entry.isExpanded}>
+                            <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
+                              {entry.appliedChanges.map((label) => (
+                                <Chip
+                                  key={`${entry.id}-${label}`}
+                                  size="small"
+                                  label={label}
+                                  variant="filled"
+                                  sx={{
+                                    height: 22,
+                                    borderRadius: 999,
+                                    backgroundColor: "#ececec",
+                                    color: "text.primary",
+                                    "& .MuiChip-label": {
+                                      px: 1,
+                                      fontSize: 12,
+                                    },
+                                  }}
+                                />
+                              ))}
+                            </Stack>
+                          </Collapse>
+                        </Box>
+                      )}
+                    </Stack>
+                  </Stack>
+                ))}
+                {fetcher.state !== "idle" && aiPendingPrompt && (
+                  <Stack direction="row" spacing={1} alignItems="flex-start">
+                    <AutoAwesomeRoundedIcon sx={{ mt: 0.4, fontSize: 14, color: "text.secondary" }} />
+                    <Stack spacing={0.5}>
+                      <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", lineHeight: 1.35 }}>
+                        {aiPendingPrompt}
+                      </Typography>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <CircularProgress size={14} />
+                        <Typography variant="body2" color="text.secondary">
+                          Applying changes...
+                        </Typography>
+                      </Stack>
+                    </Stack>
+                  </Stack>
+                )}
               </Stack>
             ) : (
-              <Typography color="text.secondary">No prompt history</Typography>
+              <Typography color="text.secondary">
+                Start by asking the assistant to change the table.
+              </Typography>
             )}
           </DialogContent>
           <Box
             sx={{
-              px: 2.5,
-              py: 1.5,
+              px: 2,
+              py: 1,
               borderTop: "1px solid",
               borderColor: "divider",
               backgroundColor: "background.paper",
             }}
           >
-            <Stack spacing={1.5}>
+            <Stack spacing={1}>
               <Box
                 sx={{
                   border: "1px solid",
                   borderColor: "divider",
-                  borderRadius: 1,
-                  p: 1,
+                  borderRadius: 0.75,
+                  px: 1,
+                  py: 0.5,
+                  backgroundColor: "#fafafa",
                 }}
               >
                 <TextField
@@ -630,11 +887,13 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                         type="submit"
                         aria-label="Ask AI"
                         disabled={fetcher.state !== "idle" || !aiPrompt.trim()}
+                        size="small"
+                        sx={{ color: "text.secondary" }}
                       >
                         {fetcher.state !== "idle" ? (
                           <CircularProgress size={18} />
                         ) : (
-                          <SendRoundedIcon />
+                          <SendRoundedIcon fontSize="small" />
                         )}
                       </IconButton>
                     ),
@@ -644,9 +903,9 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               <Box
                 sx={{
                   display: "flex",
-                  gap: 1,
+                  gap: 0.75,
                   overflowX: "auto",
-                  pb: 0.5,
+                  pb: 0.25,
                   scrollbarWidth: "thin",
                 }}
               >
@@ -655,8 +914,17 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                     key={suggestion}
                     label={suggestion}
                     variant="outlined"
-                    onClick={() => setAiPrompt(suggestion)}
-                    sx={{ cursor: "pointer", flexShrink: 0 }}
+                    onClick={() => submitAiPrompt(suggestion)}
+                    sx={{
+                      cursor: "pointer",
+                      flexShrink: 0,
+                      height: 30,
+                      borderRadius: 999,
+                      "& .MuiChip-label": {
+                        px: 1.1,
+                        fontSize: 12.5,
+                      },
+                    }}
                   />
                 ))}
               </Box>
