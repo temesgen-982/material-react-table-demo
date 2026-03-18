@@ -29,8 +29,10 @@ import {
   DialogTitle,
   Divider,
   IconButton,
-  ListItemIcon,
+  List,
+  ListItemButton,
   ListItemText,
+  ListItemIcon,
   Menu,
   MenuItem,
   Stack,
@@ -88,6 +90,28 @@ type AiAssistantHistoryEntry = {
   appliedChanges: string[];
   isExpanded: boolean;
 };
+
+type AiAssistantSession = {
+  id: string;
+  title: string;
+  messages: AiChatMessage[];
+  entries: AiAssistantHistoryEntry[];
+  pendingPrompt: string;
+  latestStatus: { kind: "success" | "error"; text: string } | null;
+};
+
+function createAiSession(): AiAssistantSession {
+  const id = crypto.randomUUID();
+
+  return {
+    id,
+    title: "New conversation",
+    messages: [],
+    entries: [],
+    pendingPrompt: "",
+    latestStatus: null,
+  };
+}
 
 function getAppliedChangeLabels(response: AiAssistantResponse | undefined) {
   if (!response?.ok) {
@@ -228,18 +252,22 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     useState<MRT_VisibilityState>(DEFAULT_COLUMN_VISIBILITY);
   const [columnPinning, setColumnPinning] =
     useState<MRT_ColumnPinningState>(DEFAULT_COLUMN_PINNING);
-  const [aiConversationId] = useState(() => crypto.randomUUID());
-  const [aiMessages, setAiMessages] = useState<AiChatMessage[]>([]);
-  const [aiHistory, setAiHistory] = useState<AiAssistantHistoryEntry[]>([]);
-  const [aiPendingPrompt, setAiPendingPrompt] = useState("");
+  const [aiSessions, setAiSessions] = useState<AiAssistantSession[]>(() => [createAiSession()]);
+  const [activeAiSessionId, setActiveAiSessionId] = useState("");
+  const [isAiHistoryOpen, setIsAiHistoryOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
-  const [aiMessage, setAiMessage] = useState<{ kind: "success" | "error"; text: string } | null>(
-    null,
-  );
   const [isAiDialogOpen, setIsAiDialogOpen] = useState(false);
 
   const fetcher = useFetcher<typeof action>();
   const lastHandledResponseRef = useRef<AiAssistantResponse | null>(null);
+  const activeAiSession =
+    aiSessions.find((session) => session.id === activeAiSessionId) ?? aiSessions[0];
+
+  useEffect(() => {
+    if (!activeAiSessionId && aiSessions[0]) {
+      setActiveAiSessionId(aiSessions[0].id);
+    }
+  }, [activeAiSessionId, aiSessions]);
 
   const handleDeleteRow = () => {
     if (!rowToDelete) {
@@ -250,12 +278,35 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     setRowToDelete(null);
   };
 
-  const resetAiAssistant = () => {
-    setAiMessages([]);
-    setAiHistory([]);
-    setAiPendingPrompt("");
+  const createNewAiSession = () => {
+    const nextSession = createAiSession();
+
+    setAiSessions((currentSessions) => [nextSession, ...currentSessions]);
+    setActiveAiSessionId(nextSession.id);
     setAiPrompt("");
-    setAiMessage(null);
+    setIsAiHistoryOpen(false);
+  };
+
+  const resetActiveAiSession = () => {
+    if (!activeAiSession) {
+      return;
+    }
+
+    setAiSessions((currentSessions) =>
+      currentSessions.map((session) =>
+        session.id === activeAiSession.id
+          ? {
+              ...session,
+              title: "New conversation",
+              messages: [],
+              entries: [],
+              pendingPrompt: "",
+              latestStatus: null,
+            }
+          : session,
+      ),
+    );
+    setAiPrompt("");
   };
 
   useEffect(() => {
@@ -267,20 +318,33 @@ export default function Home({ loaderData }: Route.ComponentProps) {
 
     lastHandledResponseRef.current = response;
 
+    if (!activeAiSession) {
+      return;
+    }
+
     if (!response.ok) {
-      setAiHistory((currentHistory) => [
-        ...currentHistory,
-        {
-          id: `${response.conversationId ?? aiConversationId}-${currentHistory.length}`,
-          prompt: aiPendingPrompt,
-          message: response.error,
-          kind: "error",
-          appliedChanges: [],
-          isExpanded: false,
-        },
-      ]);
-      setAiPendingPrompt("");
-      setAiMessage({ kind: "error", text: response.error });
+      setAiSessions((currentSessions) =>
+        currentSessions.map((session) =>
+          session.id === activeAiSession.id
+            ? {
+                ...session,
+                entries: [
+                  ...session.entries,
+                  {
+                    id: `${session.id}-${session.entries.length}`,
+                    prompt: session.pendingPrompt,
+                    message: response.error,
+                    kind: "error",
+                    appliedChanges: [],
+                    isExpanded: false,
+                  },
+                ],
+                pendingPrompt: "",
+                latestStatus: { kind: "error", text: response.error },
+              }
+            : session,
+        ),
+      );
       return;
     }
 
@@ -333,33 +397,59 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       }
     });
 
-    setAiHistory((currentHistory) => [
-      ...currentHistory,
-      {
-        id: `${response.conversationId}-${currentHistory.length}`,
-        prompt: aiPendingPrompt,
-        message: response.message,
-        kind: "success",
-        appliedChanges: getAppliedChangeLabels(response),
-        isExpanded: true,
-      },
-    ]);
-    setAiPendingPrompt("");
-    setAiMessage({ kind: "success", text: response.message });
-  }, [aiConversationId, aiPendingPrompt, fetcher.data]);
+    setAiSessions((currentSessions) =>
+      currentSessions.map((session) =>
+        session.id === activeAiSession.id
+          ? {
+              ...session,
+              title: session.title === "New conversation" ? session.pendingPrompt : session.title,
+              entries: [
+                ...session.entries,
+                {
+                  id: `${session.id}-${session.entries.length}`,
+                  prompt: session.pendingPrompt,
+                  message: response.message,
+                  kind: "success",
+                  appliedChanges: getAppliedChangeLabels(response),
+                  isExpanded: true,
+                },
+              ],
+              pendingPrompt: "",
+              latestStatus: { kind: "success", text: response.message },
+            }
+          : session,
+      ),
+    );
+  }, [activeAiSession, fetcher.data]);
 
   const submitAiPrompt = (promptOverride?: string) => {
+    if (!activeAiSession) {
+      return;
+    }
+
     const trimmedPrompt = (promptOverride ?? aiPrompt).trim();
 
     if (!trimmedPrompt) {
       return;
     }
 
-    const nextMessages: AiChatMessage[] = [...aiMessages, { role: "user", text: trimmedPrompt }];
+    const nextMessages: AiChatMessage[] = [
+      ...activeAiSession.messages,
+      { role: "user", text: trimmedPrompt },
+    ];
 
-    setAiMessages(nextMessages);
-    setAiPendingPrompt(trimmedPrompt);
-    setAiMessage(null);
+    setAiSessions((currentSessions) =>
+      currentSessions.map((session) =>
+        session.id === activeAiSession.id
+          ? {
+              ...session,
+              messages: nextMessages,
+              pendingPrompt: trimmedPrompt,
+              latestStatus: null,
+            }
+          : session,
+      ),
+    );
     setAiPrompt("");
 
     const tableContext: AiTableContext = {
@@ -374,7 +464,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
 
     fetcher.submit(
       {
-        conversationId: aiConversationId,
+        conversationId: activeAiSession.id,
         history: JSON.stringify(nextMessages),
         prompt: trimmedPrompt,
         tableContext: JSON.stringify(tableContext),
@@ -650,10 +740,12 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             </Stack>
           </Stack>
 
-          {aiMessage && (
-            <Alert severity={aiMessage.kind} sx={{ mb: 2 }}>
-              <AlertTitle>{aiMessage.kind === "success" ? "AI Assistant" : "AI Error"}</AlertTitle>
-              {aiMessage.text}
+          {activeAiSession?.latestStatus && (
+            <Alert severity={activeAiSession.latestStatus.kind} sx={{ mb: 2 }}>
+              <AlertTitle>
+                {activeAiSession.latestStatus.kind === "success" ? "AI Assistant" : "AI Error"}
+              </AlertTitle>
+              {activeAiSession.latestStatus.text}
             </Alert>
           )}
 
@@ -706,14 +798,17 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {aiPendingPrompt || aiHistory.at(-1)?.prompt || "Ask your table"}
+                  {activeAiSession?.pendingPrompt ||
+                    activeAiSession?.entries.at(-1)?.prompt ||
+                    "Ask your table"}
                 </Typography>
               </Box>
               <Stack direction="row" spacing={0.5}>
                 <Tooltip title="New conversation">
                   <IconButton
                     aria-label="Start new AI conversation"
-                    onClick={resetAiAssistant}
+                    onClick={createNewAiSession}
+                    type="button"
                     size="small"
                     sx={{ color: "text.secondary", p: 0.5 }}
                   >
@@ -723,8 +818,13 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                 <Tooltip title="History">
                   <IconButton
                     aria-label="View AI history"
+                    onClick={() => setIsAiHistoryOpen((current) => !current)}
+                    type="button"
                     size="small"
-                    sx={{ color: "text.secondary", p: 0.5 }}
+                    sx={{
+                      color: isAiHistoryOpen ? "primary.main" : "text.secondary",
+                      p: 0.5,
+                    }}
                   >
                     <HistoryRoundedIcon fontSize="small" />
                   </IconButton>
@@ -732,7 +832,8 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                 <Tooltip title="Reset conversation">
                   <IconButton
                     aria-label="Reset AI conversation"
-                    onClick={resetAiAssistant}
+                    onClick={resetActiveAiSession}
+                    type="button"
                     size="small"
                     sx={{ color: "text.secondary", p: 0.5 }}
                   >
@@ -742,6 +843,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                 <IconButton
                   aria-label="Close AI assistant"
                   onClick={() => setIsAiDialogOpen(false)}
+                  type="button"
                   size="small"
                   sx={{ color: "text.secondary", p: 0.5 }}
                 >
@@ -751,6 +853,65 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             </Stack>
           </DialogTitle>
           <Divider />
+          {isAiHistoryOpen && activeAiSession && (
+            <Box
+              sx={{
+                borderBottom: "1px solid",
+                borderColor: "divider",
+                backgroundColor: "rgba(15, 118, 110, 0.04)",
+              }}
+            >
+              <List disablePadding sx={{ py: 0.5, maxHeight: 196, overflowY: "auto" }}>
+                {aiSessions.map((session) => (
+                  <ListItemButton
+                    key={session.id}
+                    selected={session.id === activeAiSession.id}
+                    onClick={() => {
+                      setActiveAiSessionId(session.id);
+                      setIsAiHistoryOpen(false);
+                    }}
+                    sx={{
+                      px: 2,
+                      py: 1,
+                      alignItems: "flex-start",
+                      borderLeft: "2px solid transparent",
+                      borderLeftColor:
+                        session.id === activeAiSession.id ? "primary.main" : "transparent",
+                      "&.Mui-selected": {
+                        backgroundColor: "rgba(15, 118, 110, 0.08)",
+                      },
+                      "&.Mui-selected:hover": {
+                        backgroundColor: "rgba(15, 118, 110, 0.12)",
+                      },
+                    }}
+                  >
+                    <ListItemText
+                      primary={
+                        <Typography
+                          fontSize={13}
+                          fontWeight={session.id === activeAiSession.id ? 700 : 500}
+                          sx={{
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {session.title}
+                        </Typography>
+                      }
+                      secondary={
+                        <Typography variant="caption" color="text.secondary">
+                          {session.entries.length} result
+                          {session.entries.length === 1 ? "" : "s"}
+                          {session.pendingPrompt ? " • in progress" : ""}
+                        </Typography>
+                      }
+                    />
+                  </ListItemButton>
+                ))}
+              </List>
+            </Box>
+          )}
           <DialogContent
             sx={{
               px: 2,
@@ -762,9 +923,12 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               overflowY: "auto",
             }}
           >
-            {aiHistory.length > 0 || aiPendingPrompt || fetcher.state !== "idle" ? (
+            {activeAiSession &&
+            (activeAiSession.entries.length > 0 ||
+              activeAiSession.pendingPrompt ||
+              fetcher.state !== "idle") ? (
               <Stack spacing={1.5} sx={{ width: "100%" }}>
-                {aiHistory.map((entry) => (
+                {activeAiSession.entries.map((entry) => (
                   <Stack key={entry.id} direction="row" spacing={1} alignItems="flex-start">
                     <AutoAwesomeRoundedIcon
                       sx={{ mt: 0.35, fontSize: 14, color: "primary.main", opacity: 0.8 }}
@@ -787,11 +951,21 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                             size="small"
                             color="primary"
                             onClick={() =>
-                              setAiHistory((currentHistory) =>
-                                currentHistory.map((currentEntry) =>
-                                  currentEntry.id === entry.id
-                                    ? { ...currentEntry, isExpanded: !currentEntry.isExpanded }
-                                    : currentEntry,
+                              setAiSessions((currentSessions) =>
+                                currentSessions.map((session) =>
+                                  session.id === activeAiSession.id
+                                    ? {
+                                        ...session,
+                                        entries: session.entries.map((currentEntry) =>
+                                          currentEntry.id === entry.id
+                                            ? {
+                                                ...currentEntry,
+                                                isExpanded: !currentEntry.isExpanded,
+                                              }
+                                            : currentEntry,
+                                        ),
+                                      }
+                                    : session,
                                 ),
                               )
                             }
@@ -843,14 +1017,14 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                     </Stack>
                   </Stack>
                 ))}
-                {fetcher.state !== "idle" && aiPendingPrompt && (
+                {fetcher.state !== "idle" && activeAiSession.pendingPrompt && (
                   <Stack direction="row" spacing={1} alignItems="flex-start">
                     <AutoAwesomeRoundedIcon
                       sx={{ mt: 0.35, fontSize: 14, color: "primary.main", opacity: 0.8 }}
                     />
                     <Stack spacing={0.5}>
                       <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", lineHeight: 1.35 }}>
-                        {aiPendingPrompt}
+                        {activeAiSession.pendingPrompt}
                       </Typography>
                       <Stack direction="row" spacing={1} alignItems="center">
                         <CircularProgress size={14} />
@@ -862,7 +1036,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                   </Stack>
                 )}
               </Stack>
-            ) : (
+            ) : isAiHistoryOpen ? null : (
               <Typography color="text.secondary">
                 Start by asking the assistant to change the table.
               </Typography>
