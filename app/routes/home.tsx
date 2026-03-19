@@ -1,42 +1,28 @@
-import { startTransition, useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useLayoutEffect, useRef, useState } from "react";
 import AutoAwesomeRoundedIcon from "@mui/icons-material/AutoAwesomeRounded";
-import AddRoundedIcon from "@mui/icons-material/AddRounded";
-import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
-import ExpandLessRoundedIcon from "@mui/icons-material/ExpandLessRounded";
-import ExpandMoreRoundedIcon from "@mui/icons-material/ExpandMoreRounded";
-import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
-import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import PictureAsPdfOutlinedIcon from "@mui/icons-material/PictureAsPdfOutlined";
-import SendRoundedIcon from "@mui/icons-material/SendRounded";
 import TableViewOutlinedIcon from "@mui/icons-material/TableViewOutlined";
-import MicOffRoundedIcon from "@mui/icons-material/MicOffRounded";
 import {
   Alert,
   AlertTitle,
   Box,
   Button,
   Chip,
-  Collapse,
-  CircularProgress,
   CssBaseline,
   Dialog,
   DialogActions,
   DialogContent,
   DialogContentText,
   DialogTitle,
-  Divider,
   IconButton,
-  List,
-  ListItemButton,
-  ListItemText,
   ListItemIcon,
+  ListItemText,
   Menu,
   MenuItem,
   Stack,
-  TextField,
   ThemeProvider,
   Tooltip,
   Typography,
@@ -58,9 +44,9 @@ import {
 import { useFetcher } from "react-router";
 
 import { generateAiPlan, withRequiredPins } from "~/features/home/ai";
+import { AiAssistantDialog } from "~/features/home/ai-assistant-dialog";
 import { columns, theme } from "~/features/home/columns";
 import {
-  AI_PROMPT_SUGGESTIONS,
   DEFAULT_COLUMN_FILTER_FNS,
   DEFAULT_COLUMN_FILTERS,
   DEFAULT_COLUMN_PINNING,
@@ -72,6 +58,7 @@ import {
 } from "~/features/home/constants";
 import { exportPostsToCsv, exportPostsToPdf } from "~/features/home/export-utils";
 import type {
+  AiAssistantSession,
   AiAssistantResponse,
   AiChatMessage,
   AiFilter,
@@ -81,24 +68,6 @@ import type {
 } from "~/features/home/types";
 
 import type { Route } from "./+types/home";
-
-type AiAssistantHistoryEntry = {
-  id: string;
-  prompt: string;
-  message: string;
-  kind: "success" | "error";
-  appliedChanges: string[];
-  isExpanded: boolean;
-};
-
-type AiAssistantSession = {
-  id: string;
-  title: string;
-  messages: AiChatMessage[];
-  entries: AiAssistantHistoryEntry[];
-  pendingPrompt: string;
-  latestStatus: { kind: "success" | "error"; text: string } | null;
-};
 
 function createAiSession(): AiAssistantSession {
   const id = crypto.randomUUID();
@@ -260,6 +229,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
 
   const fetcher = useFetcher<typeof action>();
   const lastHandledResponseRef = useRef<AiAssistantResponse | null>(null);
+  const aiScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const activeAiSession =
     aiSessions.find((session) => session.id === activeAiSessionId) ?? aiSessions[0];
 
@@ -268,6 +238,24 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       setActiveAiSessionId(aiSessions[0].id);
     }
   }, [activeAiSessionId, aiSessions]);
+
+  useLayoutEffect(() => {
+    if (!isAiDialogOpen || !activeAiSession) {
+      return;
+    }
+
+    const container = aiScrollContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    container.scrollTop = container.scrollHeight;
+  }, [
+    activeAiSession?.entries.length,
+    activeAiSession?.pendingPrompt,
+    activeAiSessionId,
+    isAiDialogOpen,
+  ]);
 
   const handleDeleteRow = () => {
     if (!rowToDelete) {
@@ -307,6 +295,30 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       ),
     );
     setAiPrompt("");
+  };
+
+  const selectAiSession = (sessionId: string) => {
+    setActiveAiSessionId(sessionId);
+    setIsAiHistoryOpen(false);
+  };
+
+  const toggleAiEntry = (entryId: string) => {
+    if (!activeAiSession) {
+      return;
+    }
+
+    setAiSessions((currentSessions) =>
+      currentSessions.map((session) =>
+        session.id === activeAiSession.id
+          ? {
+              ...session,
+              entries: session.entries.map((entry) =>
+                entry.id === entryId ? { ...entry, isExpanded: !entry.isExpanded } : entry,
+              ),
+            }
+          : session,
+      ),
+    );
   };
 
   useEffect(() => {
@@ -451,6 +463,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       ),
     );
     setAiPrompt("");
+    setIsAiHistoryOpen(false);
 
     const tableContext: AiTableContext = {
       sorting,
@@ -753,397 +766,24 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         </Box>
       </Box>
 
-      <Dialog
-        open={isAiDialogOpen}
+      <AiAssistantDialog
+        activeSession={activeAiSession}
+        aiPrompt={aiPrompt}
+        fetcherState={fetcher.state}
+        isHistoryOpen={isAiHistoryOpen}
         onClose={() => setIsAiDialogOpen(false)}
-        fullWidth
-        maxWidth="sm"
-        PaperProps={{
-          sx: {
-            overflow: "hidden",
-            width: "min(100%, 398px)",
-            height: "min(486px, calc(100vh - 96px))",
-            borderRadius: 1.5,
-            border: "1px solid rgba(15, 118, 110, 0.12)",
-            boxShadow: "0 18px 48px rgba(15, 118, 110, 0.16)",
-          },
-        }}
-      >
-        <Box
-          component="form"
-          sx={{
-            display: "flex",
-            flexDirection: "column",
-            height: "100%",
-          }}
-          onSubmit={(event) => {
-            event.preventDefault();
-            submitAiPrompt();
-          }}
-        >
-          <DialogTitle sx={{ px: 2, py: 1.25 }}>
-            <Stack direction="row" alignItems="flex-start" justifyContent="space-between">
-              <Box>
-                <Typography fontWeight={700} lineHeight={1.1} fontSize={18}>
-                  AI Assistant
-                </Typography>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  lineHeight={1.2}
-                  sx={{
-                    maxWidth: 250,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {activeAiSession?.pendingPrompt ||
-                    activeAiSession?.entries.at(-1)?.prompt ||
-                    "Ask your table"}
-                </Typography>
-              </Box>
-              <Stack direction="row" spacing={0.5}>
-                <Tooltip title="New conversation">
-                  <IconButton
-                    aria-label="Start new AI conversation"
-                    onClick={createNewAiSession}
-                    type="button"
-                    size="small"
-                    sx={{ color: "text.secondary", p: 0.5 }}
-                  >
-                    <AddRoundedIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title="History">
-                  <IconButton
-                    aria-label="View AI history"
-                    onClick={() => setIsAiHistoryOpen((current) => !current)}
-                    type="button"
-                    size="small"
-                    sx={{
-                      color: isAiHistoryOpen ? "primary.main" : "text.secondary",
-                      p: 0.5,
-                    }}
-                  >
-                    <HistoryRoundedIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title="Reset conversation">
-                  <IconButton
-                    aria-label="Reset AI conversation"
-                    onClick={resetActiveAiSession}
-                    type="button"
-                    size="small"
-                    sx={{ color: "text.secondary", p: 0.5 }}
-                  >
-                    <RefreshRoundedIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-                <IconButton
-                  aria-label="Close AI assistant"
-                  onClick={() => setIsAiDialogOpen(false)}
-                  type="button"
-                  size="small"
-                  sx={{ color: "text.secondary", p: 0.5 }}
-                >
-                  <CloseRoundedIcon fontSize="small" />
-                </IconButton>
-              </Stack>
-            </Stack>
-          </DialogTitle>
-          <Divider />
-          {isAiHistoryOpen && activeAiSession && (
-            <Box
-              sx={{
-                borderBottom: "1px solid",
-                borderColor: "divider",
-                backgroundColor: "rgba(15, 118, 110, 0.04)",
-              }}
-            >
-              <List disablePadding sx={{ py: 0.5, maxHeight: 196, overflowY: "auto" }}>
-                {aiSessions.map((session) => (
-                  <ListItemButton
-                    key={session.id}
-                    selected={session.id === activeAiSession.id}
-                    onClick={() => {
-                      setActiveAiSessionId(session.id);
-                      setIsAiHistoryOpen(false);
-                    }}
-                    sx={{
-                      px: 2,
-                      py: 1,
-                      alignItems: "flex-start",
-                      borderLeft: "2px solid transparent",
-                      borderLeftColor:
-                        session.id === activeAiSession.id ? "primary.main" : "transparent",
-                      "&.Mui-selected": {
-                        backgroundColor: "rgba(15, 118, 110, 0.08)",
-                      },
-                      "&.Mui-selected:hover": {
-                        backgroundColor: "rgba(15, 118, 110, 0.12)",
-                      },
-                    }}
-                  >
-                    <ListItemText
-                      primary={
-                        <Typography
-                          fontSize={13}
-                          fontWeight={session.id === activeAiSession.id ? 700 : 500}
-                          sx={{
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {session.title}
-                        </Typography>
-                      }
-                      secondary={
-                        <Typography variant="caption" color="text.secondary">
-                          {session.entries.length} result
-                          {session.entries.length === 1 ? "" : "s"}
-                          {session.pendingPrompt ? " • in progress" : ""}
-                        </Typography>
-                      }
-                    />
-                  </ListItemButton>
-                ))}
-              </List>
-            </Box>
-          )}
-          <DialogContent
-            sx={{
-              px: 2,
-              py: 1.5,
-              flex: 1,
-              display: "flex",
-              alignItems: "stretch",
-              justifyContent: "flex-start",
-              overflowY: "auto",
-            }}
-          >
-            {activeAiSession &&
-            (activeAiSession.entries.length > 0 ||
-              activeAiSession.pendingPrompt ||
-              fetcher.state !== "idle") ? (
-              <Stack spacing={1.5} sx={{ width: "100%" }}>
-                {activeAiSession.entries.map((entry) => (
-                  <Stack key={entry.id} direction="row" spacing={1} alignItems="flex-start">
-                    <AutoAwesomeRoundedIcon
-                      sx={{ mt: 0.35, fontSize: 14, color: "primary.main", opacity: 0.8 }}
-                    />
-                    <Stack spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
-                      <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", lineHeight: 1.3 }}>
-                        {entry.prompt}
-                      </Typography>
-                      <Typography
-                        variant="body2"
-                        color={entry.kind === "error" ? "error.main" : "text.secondary"}
-                        sx={{ lineHeight: 1.3, fontSize: 12.5 }}
-                      >
-                        {entry.message}
-                      </Typography>
-                      {entry.kind === "success" && entry.appliedChanges.length > 0 && (
-                        <Box>
-                          <Button
-                            type="button"
-                            size="small"
-                            color="primary"
-                            onClick={() =>
-                              setAiSessions((currentSessions) =>
-                                currentSessions.map((session) =>
-                                  session.id === activeAiSession.id
-                                    ? {
-                                        ...session,
-                                        entries: session.entries.map((currentEntry) =>
-                                          currentEntry.id === entry.id
-                                            ? {
-                                                ...currentEntry,
-                                                isExpanded: !currentEntry.isExpanded,
-                                              }
-                                            : currentEntry,
-                                        ),
-                                      }
-                                    : session,
-                                ),
-                              )
-                            }
-                            endIcon={
-                              entry.isExpanded ? (
-                                <ExpandLessRoundedIcon fontSize="small" />
-                              ) : (
-                                <ExpandMoreRoundedIcon fontSize="small" />
-                              )
-                            }
-                            sx={{
-                              minWidth: 0,
-                              px: 0,
-                              mt: 0.15,
-                              mb: 0.25,
-                              fontSize: 11.5,
-                              fontWeight: 700,
-                              textTransform: "none",
-                              color: "primary.main",
-                            }}
-                          >
-                            Applied changes
-                          </Button>
-                          <Collapse in={entry.isExpanded}>
-                            <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
-                              {entry.appliedChanges.map((label) => (
-                                <Chip
-                                  key={`${entry.id}-${label}`}
-                                  size="small"
-                                  label={label}
-                                  variant="filled"
-                                  sx={{
-                                    height: 22,
-                                    borderRadius: 999,
-                                    backgroundColor: "rgba(15, 118, 110, 0.12)",
-                                    color: "#14532d",
-                                    border: "1px solid rgba(15, 118, 110, 0.16)",
-                                    "& .MuiChip-label": {
-                                      px: 1,
-                                      fontSize: 12,
-                                    },
-                                  }}
-                                />
-                              ))}
-                            </Stack>
-                          </Collapse>
-                        </Box>
-                      )}
-                    </Stack>
-                  </Stack>
-                ))}
-                {fetcher.state !== "idle" && activeAiSession.pendingPrompt && (
-                  <Stack direction="row" spacing={1} alignItems="flex-start">
-                    <AutoAwesomeRoundedIcon
-                      sx={{ mt: 0.35, fontSize: 14, color: "primary.main", opacity: 0.8 }}
-                    />
-                    <Stack spacing={0.5}>
-                      <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", lineHeight: 1.35 }}>
-                        {activeAiSession.pendingPrompt}
-                      </Typography>
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <CircularProgress size={14} />
-                        <Typography variant="body2" color="text.secondary">
-                          Applying changes...
-                        </Typography>
-                      </Stack>
-                    </Stack>
-                  </Stack>
-                )}
-              </Stack>
-            ) : isAiHistoryOpen ? null : (
-              <Typography color="text.secondary">
-                Start by asking the assistant to change the table.
-              </Typography>
-            )}
-          </DialogContent>
-          <Box
-            sx={{
-              px: 2,
-              py: 1,
-              borderTop: "1px solid",
-              borderColor: "divider",
-              backgroundColor: "background.paper",
-            }}
-          >
-            <Stack spacing={1}>
-              <Box
-                sx={{
-                  border: "1px solid",
-                  borderColor: "rgba(15, 118, 110, 0.22)",
-                  borderRadius: 0.75,
-                  px: 0.875,
-                  py: 0.375,
-                  backgroundColor: "rgba(15, 118, 110, 0.04)",
-                }}
-              >
-                <Stack direction="row" spacing={0.5} alignItems="center">
-                  <IconButton
-                    type="button"
-                    aria-label="Voice input unavailable"
-                    size="small"
-                    disabled
-                    sx={{ color: "text.disabled", p: 0.5 }}
-                  >
-                    <MicOffRoundedIcon fontSize="small" />
-                  </IconButton>
-                  <TextField
-                    autoFocus
-                    fullWidth
-                    multiline
-                    minRows={1}
-                    maxRows={4}
-                    variant="standard"
-                    value={aiPrompt}
-                    onChange={(event) => setAiPrompt(event.target.value)}
-                    placeholder="Type a prompt..."
-                    InputProps={{
-                      disableUnderline: true,
-                    }}
-                  />
-                  <IconButton
-                    type="submit"
-                    aria-label="Ask AI"
-                    disabled={fetcher.state !== "idle" || !aiPrompt.trim()}
-                    size="small"
-                    sx={{
-                      color: aiPrompt.trim() ? "primary.main" : "text.disabled",
-                      p: 0.5,
-                    }}
-                  >
-                    {fetcher.state !== "idle" ? (
-                      <CircularProgress size={18} />
-                    ) : (
-                      <SendRoundedIcon fontSize="small" />
-                    )}
-                  </IconButton>
-                </Stack>
-              </Box>
-              <Typography variant="caption" color="text.secondary">
-                Suggestions
-              </Typography>
-              <Box
-                sx={{
-                  display: "flex",
-                  gap: 0.75,
-                  overflowX: "auto",
-                  pb: 0.25,
-                  scrollbarWidth: "thin",
-                }}
-              >
-                {AI_PROMPT_SUGGESTIONS.map((suggestion) => (
-                  <Chip
-                    key={suggestion}
-                    label={suggestion}
-                    variant="outlined"
-                    onClick={() => submitAiPrompt(suggestion)}
-                    sx={{
-                      cursor: "pointer",
-                      flexShrink: 0,
-                      height: 30,
-                      borderRadius: 999,
-                      borderColor: "rgba(15, 118, 110, 0.22)",
-                      color: "text.primary",
-                      "&:hover": {
-                        backgroundColor: "rgba(15, 118, 110, 0.08)",
-                      },
-                      "& .MuiChip-label": {
-                        px: 1.1,
-                        fontSize: 12.5,
-                      },
-                    }}
-                  />
-                ))}
-              </Box>
-            </Stack>
-          </Box>
-        </Box>
-      </Dialog>
+        onCreateSession={createNewAiSession}
+        onPromptChange={setAiPrompt}
+        onResetSession={resetActiveAiSession}
+        onSelectSession={selectAiSession}
+        onSubmit={() => submitAiPrompt()}
+        onSubmitSuggestion={submitAiPrompt}
+        onToggleEntry={toggleAiEntry}
+        onToggleHistory={() => setIsAiHistoryOpen((current) => !current)}
+        open={isAiDialogOpen}
+        scrollContainerRef={aiScrollContainerRef}
+        sessions={aiSessions}
+      />
 
       <Dialog
         open={Boolean(rowToDelete)}

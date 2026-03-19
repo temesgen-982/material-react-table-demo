@@ -47,6 +47,24 @@ export type AiChatMessage = {
   text: string;
 };
 
+export type AiAssistantHistoryEntry = {
+  id: string;
+  prompt: string;
+  message: string;
+  kind: "success" | "error";
+  appliedChanges: string[];
+  isExpanded: boolean;
+};
+
+export type AiAssistantSession = {
+  id: string;
+  title: string;
+  messages: AiChatMessage[];
+  entries: AiAssistantHistoryEntry[];
+  pendingPrompt: string;
+  latestStatus: { kind: "success" | "error"; text: string } | null;
+};
+
 export type AiPlan =
   | {
       summary: string;

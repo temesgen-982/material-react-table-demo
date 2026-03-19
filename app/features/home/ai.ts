@@ -183,6 +183,73 @@ function buildAiPrompt({
   ].join("\n");
 }
 
+function parseErrorPayload(rawMessage: string) {
+  try {
+    return JSON.parse(rawMessage) as {
+      error?: {
+        code?: number;
+        message?: string;
+        status?: string;
+        details?: Array<{
+          "@type"?: string;
+          retryDelay?: string;
+        }>;
+      };
+    };
+  } catch {
+    return null;
+  }
+}
+
+function formatRetryDelay(retryDelay?: string) {
+  if (!retryDelay) {
+    return null;
+  }
+
+  const seconds = Number.parseInt(retryDelay.replace(/[^0-9]/g, ""), 10);
+
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return null;
+  }
+
+  return seconds === 1 ? "Try again in about 1 second." : `Try again in about ${seconds} seconds.`;
+}
+
+function getUserFacingAiError(error: unknown) {
+  const fallback = "The AI assistant could not process that request.";
+
+  if (!(error instanceof Error)) {
+    return fallback;
+  }
+
+  const parsedPayload = parseErrorPayload(error.message);
+  const apiError = parsedPayload?.error;
+
+  if (apiError?.code === 429 || apiError?.status === "RESOURCE_EXHAUSTED") {
+    const retryInfo = apiError.details?.find(
+      (detail) => detail["@type"] === "type.googleapis.com/google.rpc.RetryInfo",
+    );
+    const retryMessage = formatRetryDelay(retryInfo?.retryDelay);
+
+    return retryMessage
+      ? `The AI assistant is temporarily rate-limited. ${retryMessage}`
+      : "The AI assistant is temporarily rate-limited. Please try again shortly.";
+  }
+
+  if (apiError?.status === "INVALID_ARGUMENT") {
+    return "The AI assistant could not understand that request format. Try rephrasing it.";
+  }
+
+  if (apiError?.message) {
+    return apiError.message
+      .split("\n")[0]
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  return error.message.split("\n")[0].replace(/\s+/g, " ").trim() || fallback;
+}
+
 export async function generateAiPlan(
   {
     prompt,
@@ -228,8 +295,6 @@ export async function generateAiPlan(
       message: plan.summary,
     };
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "The AI assistant could not process that request.";
-    return { ok: false, error: message, conversationId };
+    return { ok: false, error: getUserFacingAiError(error), conversationId };
   }
 }
