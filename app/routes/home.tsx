@@ -1,7 +1,6 @@
 import { startTransition, useEffect, useLayoutEffect, useRef, useState } from "react";
 import AutoAwesomeRoundedIcon from "@mui/icons-material/AutoAwesomeRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
-import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
 import PictureAsPdfOutlinedIcon from "@mui/icons-material/PictureAsPdfOutlined";
 import TableViewOutlinedIcon from "@mui/icons-material/TableViewOutlined";
@@ -18,22 +17,12 @@ import {
   DialogContentText,
   DialogTitle,
   IconButton,
-  ListItemIcon,
-  ListItemText,
-  Menu,
-  MenuItem,
   Stack,
   ThemeProvider,
   Tooltip,
   Typography,
 } from "@mui/material";
 import {
-  MRT_EditActionButtons,
-  MaterialReactTable,
-  MRT_ShowHideColumnsButton,
-  MRT_ToggleFullScreenButton,
-  MRT_ToggleGlobalFilterButton,
-  useMaterialReactTable,
   type MRT_ColumnFilterFnsState,
   type MRT_ColumnFiltersState,
   type MRT_ColumnPinningState,
@@ -43,6 +32,7 @@ import {
 } from "material-react-table";
 import { useFetcher } from "react-router";
 
+import { DataTable } from "~/features/data-table/data-table";
 import { generateAiPlan, withRequiredPins } from "~/features/home/ai";
 import { AiAssistantDialog } from "~/features/home/ai-assistant-dialog";
 import { columns, theme } from "~/features/home/columns";
@@ -208,7 +198,6 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   const { posts, total } = loaderData;
 
   const [data, setData] = useState(posts);
-  const [exportMenuAnchor, setExportMenuAnchor] = useState<null | HTMLElement>(null);
   const [rowToDelete, setRowToDelete] = useState<Post | null>(null);
   const [sorting, setSorting] = useState<MRT_SortingState>(DEFAULT_SORTING);
   const [grouping, setGrouping] = useState<MRT_GroupingState>(DEFAULT_GROUPING);
@@ -486,228 +475,6 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     );
   };
 
-  const table = useMaterialReactTable({
-    columns,
-    data,
-    enableColumnPinning: true,
-    enableColumnOrdering: true,
-    enableDensityToggle: false,
-    enableEditing: true,
-    enableExpanding: true,
-    enableGlobalFilter: true,
-    enableGrouping: true,
-    enableRowActions: true,
-    enableRowNumbers: true,
-    enableRowSelection: true,
-    enableMultiRowSelection: true,
-    enableStickyFooter: true,
-    editDisplayMode: "modal",
-    getRowId: (row) => String(row.id),
-    initialState: {
-      pagination: {
-        pageIndex: 0,
-        pageSize: 10,
-      },
-    },
-    onColumnFiltersChange: setColumnFilters,
-    onColumnPinningChange: (updater) =>
-      setColumnPinning((currentPinning) =>
-        withRequiredPins(typeof updater === "function" ? updater(currentPinning) : updater),
-      ),
-    onColumnVisibilityChange: setColumnVisibility,
-    onGlobalFilterChange: setGlobalFilter,
-    onGroupingChange: setGrouping,
-    onSortingChange: setSorting,
-    state: {
-      columnFilterFns,
-      columnFilters,
-      columnPinning,
-      columnVisibility,
-      globalFilter,
-      grouping,
-      sorting,
-    },
-    muiPaginationProps: {
-      rowsPerPageOptions: [10, 20, 30],
-      variant: "outlined",
-    },
-    muiSearchTextFieldProps: {
-      placeholder: "Search posts",
-      size: "small",
-      variant: "outlined",
-    },
-    onEditingRowSave: async ({ row, values, table }) => {
-      const updatedPost: Post = {
-        ...row.original,
-        ...values,
-        id: Number(values.id ?? row.original.id),
-        views: Number(values.views ?? row.original.views),
-        userId: Number(values.userId ?? row.original.userId),
-        reactions: {
-          likes: Number(values.likes ?? row.original.reactions.likes),
-          dislikes: Number(values.dislikes ?? row.original.reactions.dislikes),
-        },
-        tags:
-          typeof values.tags === "string"
-            ? values.tags
-                .split(",")
-                .map((tag) => tag.trim())
-                .filter(Boolean)
-            : row.original.tags,
-      };
-
-      setData((currentRows) =>
-        currentRows.map((post) => (post.id === row.original.id ? updatedPost : post)),
-      );
-      table.setEditingRow(null);
-    },
-    renderToolbarInternalActions: ({ table }) => {
-      const selectedRows = table.getSelectedRowModel().flatRows.map((row) => row.original);
-      const currentRows = table.getPrePaginationRowModel().flatRows.map((row) => row.original);
-
-      return (
-        <>
-          <MRT_ToggleGlobalFilterButton table={table} />
-          <Tooltip title="Export data">
-            <IconButton
-              aria-label="Open export options"
-              onClick={(event) => setExportMenuAnchor(event.currentTarget)}
-            >
-              <DownloadRoundedIcon />
-            </IconButton>
-          </Tooltip>
-          <MRT_ShowHideColumnsButton table={table} />
-          <Tooltip title="Ask AI">
-            <IconButton aria-label="Open AI assistant" onClick={() => setIsAiDialogOpen(true)}>
-              <AutoAwesomeRoundedIcon />
-            </IconButton>
-          </Tooltip>
-          <MRT_ToggleFullScreenButton table={table} />
-          <Menu
-            anchorEl={exportMenuAnchor}
-            open={Boolean(exportMenuAnchor)}
-            onClose={() => setExportMenuAnchor(null)}
-          >
-            <MenuItem
-              onClick={() => {
-                exportPostsToCsv(currentRows, "posts-visible-rows.csv");
-                setExportMenuAnchor(null);
-              }}
-            >
-              <ListItemIcon>
-                <TableViewOutlinedIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>Export all rows (CSV)</ListItemText>
-            </MenuItem>
-            <MenuItem
-              onClick={() => {
-                exportPostsToCsv(data, "posts-all-data.csv");
-                setExportMenuAnchor(null);
-              }}
-            >
-              <ListItemIcon>
-                <TableViewOutlinedIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>Export all data (CSV)</ListItemText>
-            </MenuItem>
-            <MenuItem
-              disabled={selectedRows.length === 0}
-              onClick={() => {
-                exportPostsToCsv(selectedRows, "posts-selected-rows.csv");
-                setExportMenuAnchor(null);
-              }}
-            >
-              <ListItemIcon>
-                <TableViewOutlinedIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>Export selected rows (CSV)</ListItemText>
-            </MenuItem>
-            <MenuItem
-              onClick={() => {
-                exportPostsToPdf(currentRows, "Visible Posts Export");
-                setExportMenuAnchor(null);
-              }}
-            >
-              <ListItemIcon>
-                <PictureAsPdfOutlinedIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>Export all rows (PDF)</ListItemText>
-            </MenuItem>
-            <MenuItem
-              onClick={() => {
-                exportPostsToPdf(data, "All Posts Export");
-                setExportMenuAnchor(null);
-              }}
-            >
-              <ListItemIcon>
-                <PictureAsPdfOutlinedIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>Export all data (PDF)</ListItemText>
-            </MenuItem>
-            <MenuItem
-              disabled={selectedRows.length === 0}
-              onClick={() => {
-                exportPostsToPdf(selectedRows, "Selected Posts Export");
-                setExportMenuAnchor(null);
-              }}
-            >
-              <ListItemIcon>
-                <PictureAsPdfOutlinedIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>Export selected rows (PDF)</ListItemText>
-            </MenuItem>
-          </Menu>
-        </>
-      );
-    },
-    renderRowActions: ({ row, table }) => (
-      <Box sx={{ display: "flex", gap: 0.5 }}>
-        <Tooltip title="Edit post">
-          <IconButton aria-label={`Edit post ${row.original.id}`} onClick={() => table.setEditingRow(row)}>
-            <EditOutlinedIcon />
-          </IconButton>
-        </Tooltip>
-        <Tooltip title="Delete post">
-          <IconButton
-            aria-label={`Delete post ${row.original.id}`}
-            color="error"
-            onClick={() => setRowToDelete(row.original)}
-          >
-            <DeleteOutlineRoundedIcon />
-          </IconButton>
-        </Tooltip>
-      </Box>
-    ),
-    renderDetailPanel: ({ row }) => (
-      <Box
-        sx={{
-          display: "grid",
-          gap: 1.5,
-          px: 2,
-          py: 2.5,
-        }}
-      >
-        <Typography variant="subtitle2" color="text.secondary">
-          Post body
-        </Typography>
-        <Typography variant="body1" sx={{ lineHeight: 1.7 }}>
-          {row.original.body}
-        </Typography>
-      </Box>
-    ),
-    renderEditRowDialogContent: ({ internalEditComponents, row, table }) => (
-      <>
-        <DialogTitle>Edit post</DialogTitle>
-        <DialogContent sx={{ px: 3, py: 2 }}>
-          <Stack spacing={2}>{internalEditComponents}</Stack>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 3 }}>
-          <MRT_EditActionButtons row={row} table={table} variant="text" />
-        </DialogActions>
-      </>
-    ),
-  });
-
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -762,7 +529,142 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             </Alert>
           )}
 
-          <MaterialReactTable table={table} />
+          <DataTable
+            columns={columns}
+            data={data}
+            editDialogTitle="Edit post"
+            exportActions={[
+              {
+                icon: <TableViewOutlinedIcon fontSize="small" />,
+                label: "Export all rows (CSV)",
+                onClick: (rows) => exportPostsToCsv(rows, "posts-visible-rows.csv"),
+                rows: "visible",
+              },
+              {
+                icon: <TableViewOutlinedIcon fontSize="small" />,
+                label: "Export all data (CSV)",
+                onClick: (rows) => exportPostsToCsv(rows, "posts-all-data.csv"),
+                rows: "all",
+              },
+              {
+                icon: <TableViewOutlinedIcon fontSize="small" />,
+                label: "Export selected rows (CSV)",
+                onClick: (rows) => exportPostsToCsv(rows, "posts-selected-rows.csv"),
+                rows: "selected",
+              },
+              {
+                icon: <PictureAsPdfOutlinedIcon fontSize="small" />,
+                label: "Export all rows (PDF)",
+                onClick: (rows) => exportPostsToPdf(rows, "Visible Posts Export"),
+                rows: "visible",
+              },
+              {
+                icon: <PictureAsPdfOutlinedIcon fontSize="small" />,
+                label: "Export all data (PDF)",
+                onClick: (rows) => exportPostsToPdf(rows, "All Posts Export"),
+                rows: "all",
+              },
+              {
+                icon: <PictureAsPdfOutlinedIcon fontSize="small" />,
+                label: "Export selected rows (PDF)",
+                onClick: (rows) => exportPostsToPdf(rows, "Selected Posts Export"),
+                rows: "selected",
+              },
+            ]}
+            extraToolbarActions={() => (
+              <Tooltip title="Ask AI">
+                <IconButton aria-label="Open AI assistant" onClick={() => setIsAiDialogOpen(true)}>
+                  <AutoAwesomeRoundedIcon />
+                </IconButton>
+              </Tooltip>
+            )}
+            getRowId={(row) => String(row.id)}
+            onColumnFiltersChange={setColumnFilters}
+            onColumnPinningChange={(updater) =>
+              setColumnPinning((currentPinning) =>
+                withRequiredPins(typeof updater === "function" ? updater(currentPinning) : updater),
+              )
+            }
+            onColumnVisibilityChange={setColumnVisibility}
+            onEditingRowSave={async ({ row, values, table }) => {
+              const updatedPost: Post = {
+                ...row.original,
+                ...values,
+                id: Number(values.id ?? row.original.id),
+                views: Number(values.views ?? row.original.views),
+                userId: Number(values.userId ?? row.original.userId),
+                reactions: {
+                  likes: Number(values.likes ?? row.original.reactions.likes),
+                  dislikes: Number(values.dislikes ?? row.original.reactions.dislikes),
+                },
+                tags:
+                  typeof values.tags === "string"
+                    ? values.tags
+                        .split(",")
+                        .map((tag) => tag.trim())
+                        .filter(Boolean)
+                    : row.original.tags,
+              };
+
+              setData((currentRows) =>
+                currentRows.map((post) => (post.id === row.original.id ? updatedPost : post)),
+              );
+              table.setEditingRow(null);
+            }}
+            onGlobalFilterChange={setGlobalFilter}
+            onGroupingChange={setGrouping}
+            onSortingChange={setSorting}
+            searchPlaceholder="Search posts"
+            state={{
+              columnFilterFns,
+              columnFilters,
+              columnPinning,
+              columnVisibility,
+              globalFilter,
+              grouping,
+              sorting,
+            }}
+            tableOptions={{
+              renderDetailPanel: ({ row }) => (
+                <Box
+                  sx={{
+                    display: "grid",
+                    gap: 1.5,
+                    px: 2,
+                    py: 2.5,
+                  }}
+                >
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Post body
+                  </Typography>
+                  <Typography variant="body1" sx={{ lineHeight: 1.7 }}>
+                    {row.original.body}
+                  </Typography>
+                </Box>
+              ),
+              renderRowActions: ({ row, table }) => (
+                <Box sx={{ display: "flex", gap: 0.5 }}>
+                  <Tooltip title="Edit post">
+                    <IconButton
+                      aria-label={`Edit post ${row.original.id}`}
+                      onClick={() => table.setEditingRow(row)}
+                    >
+                      <EditOutlinedIcon />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Delete post">
+                    <IconButton
+                      aria-label={`Delete post ${row.original.id}`}
+                      color="error"
+                      onClick={() => setRowToDelete(row.original)}
+                    >
+                      <DeleteOutlineRoundedIcon />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
+              ),
+            }}
+          />
         </Box>
       </Box>
 
